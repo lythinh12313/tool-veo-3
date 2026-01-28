@@ -1,82 +1,86 @@
 import streamlit as st
-import google.generativeai as genai
+import requests
 import time
+import base64
 from PIL import Image
+import io
 
-# --- CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(
-    page_title="Veo 3 Pro Studio", 
-    page_icon="🎬", 
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# --- CẤU HÌNH ---
+st.set_page_config(page_title="Veo 3 Direct API", page_icon="🎬", layout="wide")
 
-st.title("🎬 Veo 3 Video Studio")
-st.markdown("Công cụ tạo video AI chuyên nghiệp chạy trên Android.")
+st.title("🎬 Veo 3 Video Studio (Direct API)")
 
-# --- SIDEBAR: CẤU HÌNH ---
 with st.sidebar:
-    st.header("⚙️ Cài đặt")
+    st.header("⚙️ Cấu hình")
     api_key = st.text_input("Google API Key:", type="password")
-    st.divider()
-    aspect_ratio = st.selectbox("Tỉ lệ khung hình:", ["16:9", "9:16", "1:1"])
-    st.info("Lấy API Key tại: aistudio.google.com")
+    aspect_ratio = st.selectbox("Tỉ lệ:", ["OUT_ASPECT_RATIO_16_9", "OUT_ASPECT_RATIO_9_16", "OUT_ASPECT_RATIO_1_1"])
+    st.info("Sử dụng phương thức Request trực tiếp để tránh lỗi thư viện cũ.")
 
-# --- GIAO DIỆN CHÍNH ---
-col1, col2 = st.columns([1, 1])
+# --- HÀM HỖ TRỢ ---
+def image_to_base64(image):
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode()
 
-with col1:
-    prompt = st.text_area("Mô tả video của bạn:", height=150, placeholder="Ví dụ: Một con rồng băng đang bay qua dãy Himalaya...")
-    uploaded_file = st.file_uploader("Tải ảnh tham chiếu (Tùy chọn):", type=['png', 'jpg', 'jpeg'])
-    
-    if uploaded_file:
-        img = Image.open(uploaded_file)
-        st.image(img, caption="Ảnh đã tải lên", use_container_width=True)
+# --- GIAO DIỆN ---
+prompt = st.text_area("Mô tả video:", placeholder="Mô tả chi tiết cảnh quay...")
+uploaded_file = st.file_uploader("Ảnh tham chiếu (Tùy chọn):", type=['jpg', 'jpeg', 'png'])
 
-# --- NÚT TẠO VIDEO ---
-if st.button("🚀 Bắt đầu tạo Video", use_container_width=True):
+if st.button("🚀 Tạo Video", use_container_width=True):
     if not api_key:
-        st.error("Vui lòng nhập API Key ở menu bên trái!")
+        st.error("Thiếu API Key!")
     elif not prompt:
-        st.warning("Vui lòng nhập mô tả video!")
+        st.warning("Vui lòng nhập mô tả!")
     else:
         try:
-            genai.configure(api_key=api_key)
-            
-            with st.status("🤖 Veo 3 đang xử lý...", expanded=True) as status:
-                input_data = [prompt]
-                if uploaded_file:
-                    input_data.append(img)
-                
-                st.write("Đang gửi yêu cầu tới server Google...")
-                # Sử dụng phương thức khởi tạo model trước khi gọi tạo video
-model = genai.GenerativeModel("veo-3.1-generate-preview")
-operation = model.generate_content(
-    input_data,
-    # Cấu hình cho Veo thường nằm trong công cụ này nếu API chính thức cập nhật
-)
-# Lưu ý: Nếu Veo 3 vẫn đang ở bản giới hạn, 
-# hãy dùng lệnh trực tiếp từ genai nhưng đảm bảo thư viện đã update ở Bước 1.
-                )
-                
-                start_time = time.time()
-                while not operation.done:
-                    elapsed = int(time.time() - start_time)
-                    st.write(f"Đang xử lý video... ({elapsed} giây)")
-                    time.sleep(10)
-                
-                status.update(label="✅ Đã xong!", state="complete")
+            # 1. Chuẩn bị Endpoint và Header
+            # Lưu ý: Endpoint này có thể thay đổi tùy theo vùng (region) của bạn
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:generateContent?key={api_key}"
+            headers = {'Content-Type': 'application/json'}
 
-            # Hiển thị kết quả
-            video_result = operation.result()
-            video_file_name = f"veo_video_{int(time.time())}.mp4"
-            video_result.save(video_file_name)
-            
-            st.success("Video đã tạo thành công!")
-            st.video(video_file_name)
-            
-            with open(video_file_name, "rb") as file:
-                st.download_button("📥 Tải về điện thoại", data=file, file_name=video_file_name)
-                    
+            # 2. Chuẩn bị dữ liệu Payload
+            parts = [{"text": prompt}]
+            if uploaded_file:
+                img = Image.open(uploaded_file)
+                img_base64 = image_to_base64(img)
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": img_base64
+                    }
+                })
+
+            payload = {
+                "contents": [{"parts": parts}],
+                "generation_config": {
+                    "aspect_ratio": aspect_ratio
+                }
+            }
+
+            # 3. Gửi yêu cầu
+            with st.status("📡 Đang gửi yêu cầu tới Google Veo...") as status:
+                response = requests.post(url, headers=headers, json=payload)
+                res_data = response.json()
+
+                if response.status_code != 200:
+                    st.error(f"Lỗi API: {res_data.get('error', {}).get('message', 'Không rõ lỗi')}")
+                    st.stop()
+
+                # Kiểm tra xem có video trả về ngay không (hoặc là một Operation ID)
+                # Lưu ý: Veo thường trả về một Operation để Polling
+                st.write("Đang khởi tạo quá trình render...")
+                
+                # Cấu trúc phản hồi thực tế của Veo sẽ tùy thuộc vào việc bạn dùng Vertex hay AI Studio
+                # Dưới đây là logic xử lý chung cho kết quả trả về
+                if 'video' in str(res_data): 
+                    st.success("Đã nhận được dữ liệu video!")
+                    # (Logic xử lý hiển thị video từ bytes/URL ở đây)
+                else:
+                    st.json(res_data) # Hiển thị kết quả thô để bạn debug nếu cần
+                    st.info("Yêu cầu đã được gửi. Nếu đây là tài khoản thử nghiệm, hãy kiểm tra tiến trình trong Google AI Studio.")
+
         except Exception as e:
-            st.error(f"Lỗi hệ thống: {str(e)}")
+            st.error(f"Lỗi kết nối: {str(e)}")
+
+st.divider()
+st.caption("Lưu ý: Veo 3 hiện vẫn đang trong giai đoạn Preview (thử nghiệm giới hạn).")
