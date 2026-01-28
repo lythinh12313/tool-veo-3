@@ -49,10 +49,14 @@ if st.button("🚀 Bắt đầu tạo Video", use_container_width=True):
                     input_data.append(img)
                 
                 st.write("Đang gửi yêu cầu tới server Google...")
-                operation = genai.generate_videos(
-                    model="veo-3.1-generate-preview",
-                    prompt=input_data,
-                    config={"aspect_ratio": aspect_ratio}
+                # Sử dụng phương thức khởi tạo model trước khi gọi tạo video
+model = genai.GenerativeModel("veo-3.1-generate-preview")
+operation = model.generate_content(
+    input_data,
+    # Cấu hình cho Veo thường nằm trong công cụ này nếu API chính thức cập nhật
+)
+# Lưu ý: Nếu Veo 3 vẫn đang ở bản giới hạn, 
+# hãy dùng lệnh trực tiếp từ genai nhưng đảm bảo thư viện đã update ở Bước 1.
                 )
                 
                 start_time = time.time()
