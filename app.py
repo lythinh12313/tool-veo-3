@@ -5,82 +5,68 @@ import base64
 from PIL import Image
 import io
 
-# --- CẤU HÌNH ---
-st.set_page_config(page_title="Veo 3 Direct API", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Veo 3 Pro Studio", page_icon="🎬")
 
-st.title("🎬 Veo 3 Video Studio (Direct API)")
+st.title("🎬 Veo 3 Video Studio")
 
 with st.sidebar:
-    st.header("⚙️ Cấu hình")
+    st.header("⚙️ Cài đặt")
     api_key = st.text_input("Google API Key:", type="password")
-    aspect_ratio = st.selectbox("Tỉ lệ:", ["OUT_ASPECT_RATIO_16_9", "OUT_ASPECT_RATIO_9_16", "OUT_ASPECT_RATIO_1_1"])
-    st.info("Sử dụng phương thức Request trực tiếp để tránh lỗi thư viện cũ.")
+    # Đổi lại giá trị đơn giản để API dễ nhận diện
+    ar_option = st.selectbox("Tỉ lệ khung hình:", ["16:9", "9:16", "1:1"])
+    st.info("Lưu ý: Đảm bảo tài khoản của bạn đã được cấp quyền sử dụng Veo 3.")
 
-# --- HÀM HỖ TRỢ ---
 def image_to_base64(image):
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode()
 
-# --- GIAO DIỆN ---
-prompt = st.text_area("Mô tả video:", placeholder="Mô tả chi tiết cảnh quay...")
+prompt = st.text_area("Mô tả video:", placeholder="Ví dụ: Cinematic drone shot of a tropical island...")
 uploaded_file = st.file_uploader("Ảnh tham chiếu (Tùy chọn):", type=['jpg', 'jpeg', 'png'])
 
-if st.button("🚀 Tạo Video", use_container_width=True):
+if st.button("🚀 Bắt đầu tạo Video", use_container_width=True):
     if not api_key:
-        st.error("Thiếu API Key!")
+        st.error("Vui lòng nhập API Key!")
     elif not prompt:
         st.warning("Vui lòng nhập mô tả!")
     else:
         try:
-            # 1. Chuẩn bị Endpoint và Header
-            # Lưu ý: Endpoint này có thể thay đổi tùy theo vùng (region) của bạn
+            # Endpoint chuẩn cho Gemini/Veo API Studio
             url = f"https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:generateContent?key={api_key}"
             headers = {'Content-Type': 'application/json'}
 
-            # 2. Chuẩn bị dữ liệu Payload
             parts = [{"text": prompt}]
             if uploaded_file:
-                img = Image.open(uploaded_file)
-                img_base64 = image_to_base64(img)
-                parts.append({
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": img_base64
-                    }
-                })
+                img_base64 = image_to_base64(Image.open(uploaded_file))
+                parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_base64}})
 
+            # Cấu trúc Payload chuẩn hóa lại
             payload = {
                 "contents": [{"parts": parts}],
-                "generation_config": {
-                    "aspect_ratio": aspect_ratio
+                "generationConfig": {
+                    "aspectRatio": ar_option # Gửi "16:9", "9:16" hoặc "1:1"
                 }
             }
 
-            # 3. Gửi yêu cầu
-            with st.status("📡 Đang gửi yêu cầu tới Google Veo...") as status:
+            with st.status("📡 Đang gửi yêu cầu...") as status:
                 response = requests.post(url, headers=headers, json=payload)
                 res_data = response.json()
 
                 if response.status_code != 200:
-                    st.error(f"Lỗi API: {res_data.get('error', {}).get('message', 'Không rõ lỗi')}")
-                    st.stop()
+                    # Nếu lỗi vẫn ở 'aspectRatio', mình sẽ thử gửi lại không có config
+                    st.write("Đang thử lại với cấu hình tối giản...")
+                    simple_payload = {"contents": [{"parts": parts}]}
+                    response = requests.post(url, headers=headers, json=simple_payload)
+                    res_data = response.json()
 
-                # Kiểm tra xem có video trả về ngay không (hoặc là một Operation ID)
-                # Lưu ý: Veo thường trả về một Operation để Polling
-                st.write("Đang khởi tạo quá trình render...")
-                
-                # Cấu trúc phản hồi thực tế của Veo sẽ tùy thuộc vào việc bạn dùng Vertex hay AI Studio
-                # Dưới đây là logic xử lý chung cho kết quả trả về
-                if 'video' in str(res_data): 
-                    st.success("Đã nhận được dữ liệu video!")
-                    # (Logic xử lý hiển thị video từ bytes/URL ở đây)
+                if response.status_code == 200:
+                    st.success("Yêu cầu đã được chấp nhận!")
+                    # Veo trả về một chuỗi phản hồi chứa Video hoặc Operation
+                    st.json(res_data) # Hiển thị để kiểm tra cấu trúc trả về
                 else:
-                    st.json(res_data) # Hiển thị kết quả thô để bạn debug nếu cần
-                    st.info("Yêu cầu đã được gửi. Nếu đây là tài khoản thử nghiệm, hãy kiểm tra tiến trình trong Google AI Studio.")
+                    st.error(f"Lỗi API: {res_data.get('error', {}).get('message', 'Không xác định')}")
 
         except Exception as e:
-            st.error(f"Lỗi kết nối: {str(e)}")
+            st.error(f"Lỗi: {str(e)}")
 
-st.divider()
-st.caption("Lưu ý: Veo 3 hiện vẫn đang trong giai đoạn Preview (thử nghiệm giới hạn).")
+st.caption("Nếu API trả về JSON thành công, mình sẽ viết thêm hàm giải mã Video từ JSON đó cho bạn!")
